@@ -6,10 +6,17 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from models.fcn32s import fcn32s
+from models.fcn16s import fcn16s
+from models.fcn8s import fcn8s
 from utils import dataset, trainer
 
 
-parser = argparse.ArgumentParser(description='FCN Training With Pytorch')
+parser = argparse.ArgumentParser(description="FCN Training With Pytorch")
+parser.add_argument("--model", type=str, default="fcn32s",
+                    choices=["fcn32s", "fcn16s", "fcn8s"],
+                    help="use which model (default: fcn32s)")
+parser.add_argument('--pretrained-model', default='./checkpoints/fcn32s/model_best.pth.tar',
+                    help='pretrained model')
 parser.add_argument('--max-iter', type=int, default=10000, help='max iter')
 parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
                     help='learning rate (default: 1e-4)')
@@ -61,18 +68,38 @@ elif args.dataset == "sbd":
 
 
 # [2] network
-model = fcn32s(n_class=21)
+if args.model == "fcn32s":
+    model = fcn32s(n_class=21)
+elif args.model == "fcn16s":
+    model = fcn16s(n_class=21)
+elif args.model == "fcn8s":
+    model = fcn8s(n_class=21)
+
 start_epoch = 0
 start_iteration = 0
+best_mean_iou = 0
+
 if args.resume:
     checkpoint = torch.load(args.resume)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    start_epoch = checkpoint['epoch']
-    start_iteration = checkpoint['iteration']
+    model.load_state_dict(checkpoint["model_state_dict"])
+    start_epoch = checkpoint["epoch"]
+    start_iteration = checkpoint["iteration"]
+    best_mean_iou = checkpoint["best_mean_iou"]
 else:
-    import torchvision
-    vgg16 = torchvision.models.vgg16(pretrained=True)
-    model.copy_params_from_vgg16(vgg16)
+    if args.model == "fcn32s":
+        import torchvision
+        vgg16 = torchvision.models.vgg16(pretrained=True)
+        model.copy_params_from_vgg16(vgg16)
+    elif args.model == "fcn16s":
+        fcn32s_model = fcn32s(n_class=21)
+        checkpoint = torch.load(args.pretrained_model)
+        fcn32s_model.load_state_dict(checkpoint["model_state_dict"])
+        model.copy_params_from_fcn32s(fcn32s_model)
+    elif args.model == "fcn8s":
+        fcn16s_model = fcn16s(n_class=21)
+        checkpoint = torch.load(args.pretrained_model)
+        fcn16s_model.load_state_dict(checkpoint["model_state_dict"])
+        model.copy_params_from_fcn16s(fcn16s_model)
 
 
 # [3] optimizer
@@ -95,13 +122,14 @@ optimizer = torch.optim.SGD(
     momentum=args.momentum,
     weight_decay=args.weight_decay)
 if args.resume:
-    optimizer.load_state_dict(checkpoint['optim_state_dict'])
+    optimizer.load_state_dict(checkpoint["optim_state_dict"])
     for state in optimizer.state.values():
         for k, v in state.items():
             if torch.is_tensor(v):
                 state[k] = v.cuda()
 
 criterion = nn.CrossEntropyLoss(ignore_index=-1)
+
 
 # [4] training
 fcn_trainer = trainer.Trainer(
@@ -117,4 +145,6 @@ fcn_trainer = trainer.Trainer(
 )
 fcn_trainer.epoch = start_epoch
 fcn_trainer.iteration = start_iteration
+fcn_trainer.best_mean_iou = best_mean_iou
+
 fcn_trainer.train()

@@ -3,6 +3,7 @@ import math
 import shutil
 
 import fcn
+import tqdm
 import torch
 import skimage
 import numpy as np
@@ -43,7 +44,10 @@ class Trainer(object):
         visualizations = []
         label_trues, label_preds = [], []
 
-        for batch_idx, (img, target) in enumerate(self.val_loader):
+        for batch_idx, (img, target) in tqdm.tqdm(
+            enumerate(self.val_loader), total=len(self.val_loader),
+            desc="val at iter=%d" % self.iteration, ncols=80, ascii=True
+        ):
             img, target = img.to(self.device), target.to(self.device)
             with torch.no_grad():
                 prediction = self.model(img)
@@ -58,6 +62,7 @@ class Trainer(object):
             val_loss += loss
 
             imgs = img.data.cpu()
+            prediction = torch.nn.functional.softmax(prediction, dim=1)
             lbl_pred = prediction.data.max(1)[1].cpu().numpy()[:, :, :]
             lbl_true = target.data.cpu()
             for im, lt, lp in zip(imgs, lbl_true, lbl_pred):
@@ -69,8 +74,8 @@ class Trainer(object):
                     viz = fcn.utils.visualize_segmentation(
                         lbl_pred=lp, lbl_true=lt, img=im, n_class=n_class)
                     visualizations.append(viz)
-            if batch_idx % 200 == 0:
-                print("val on batch id:", batch_idx)
+            # if batch_idx % 200 == 0:
+            #     print("val on batch id:", batch_idx)
         metrics = label_accuracy_score(label_trues, label_preds, n_class)
 
         out = os.path.join(self.save_dir, 'visualization_viz')
@@ -173,6 +178,8 @@ class Trainer(object):
             #     f.write(','.join(log) + '\n')
 
             if self.iteration >= self.max_iter:
+                if self.iteration % self.validate_interval != 0:
+                    self.validate()
                 break
 
     def train(self):
