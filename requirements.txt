@@ -1,7 +1,8 @@
 torch>=1.0.0
 torchvision
 numpy
-Pillow
 scipy
+Pillow
 scikit-image
+opencv-contrib-python
 tqdm

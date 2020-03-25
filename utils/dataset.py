@@ -3,7 +3,7 @@ import collections
 
 import numpy as np
 from PIL import Image
-import scipy
+import scipy.io
 import torch
 from torch.utils import data
 

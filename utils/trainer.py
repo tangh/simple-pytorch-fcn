@@ -7,7 +7,7 @@ import logging
 
 import tqdm
 import torch
-import skimage
+import skimage.io
 
 from .misc import MetricLogger
 from .metrics import label_accuracy_score
@@ -74,12 +74,9 @@ class Trainer(object):
             lbl_true = target.data.cpu()
             for im, lt, lp in zip(imgs, lbl_true, lbl_pred):
                 im, lt = self.val_loader.dataset.to_numpy(im, lt)
-
                 label_trues.append(lt)
                 label_preds.append(lp)
                 if len(visualizations) < 9:
-                    # viz = fcn.utils.visualize_segmentation(
-                    #     lbl_pred=lp, lbl_true=lt, img=im, n_class=n_class)
                     viz = visualize_segmentation(
                         lbl_pred=lp, lbl_true=lt, img=im, n_class=n_class
                     )

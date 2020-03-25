@@ -1,5 +1,3 @@
-from __future__ import division
-
 import copy
 from distutils.version import LooseVersion
 import math
@@ -12,7 +10,6 @@ except ImportError:
 
 import numpy as np
 import scipy.ndimage
-import six
 import skimage
 import skimage.color
 import skimage.transform
@@ -49,10 +46,10 @@ def labelcolormap(*args, **kwargs):
 
 def label_colormap(N=256):
     cmap = np.zeros((N, 3))
-    for i in six.moves.range(0, N):
+    for i in range(0, N):
         id = i
         r, g, b = 0, 0, 0
-        for j in six.moves.range(0, 8):
+        for j in range(0, 8):
             r = np.bitwise_or(r, (bitget(id, 0) << 7 - j))
             g = np.bitwise_or(g, (bitget(id, 1) << 7 - j))
             b = np.bitwise_or(b, (bitget(id, 2) << 7 - j))
@@ -74,7 +71,7 @@ def visualize_labelcolormap(*args, **kwargs):
 def visualize_label_colormap(cmap):
     n_colors = len(cmap)
     ret = np.zeros((n_colors, 10 * 10, 3))
-    for i in six.moves.range(n_colors):
+    for i in range(n_colors):
         ret[i, ...] = cmap[i]
     return ret.reshape((n_colors * 10, 10, 3))
 
@@ -147,8 +144,8 @@ def _tile_images(imgs, tile_shape, concatenated_image):
         else:
             concatenated_image = np.zeros(
                 (one_height * y_num, one_width * x_num), dtype=np.uint8)
-    for y in six.moves.range(y_num):
-        for x in six.moves.range(x_num):
+    for y in range(y_num):
+        for x in range(x_num):
             i = x + y * x_num
             if i >= len(imgs):
                 pass
@@ -159,11 +156,13 @@ def _tile_images(imgs, tile_shape, concatenated_image):
 
 
 def get_tile_image(imgs, tile_shape=None, result_img=None, margin_color=None):
-    """Concatenate images whose sizes are different.
-
-    @param imgs: image list which should be concatenated
-    @param tile_shape: shape for which images should be concatenated
-    @param result_img: numpy array to put result image
+    """
+    Concatenate images whose sizes are different.
+    
+    Arguments:
+        imgs (list[ndarray]): image list to be concatenated
+        @param tile_shape: shape for which images should be concatenated
+        @param result_img: numpy array to put result image
     """
     def resize(*args, **kwargs):
         # anti_aliasing arg cannot be passed to skimage<0.14
@@ -212,6 +211,10 @@ def get_tile_image(imgs, tile_shape=None, result_img=None, margin_color=None):
 
 def label2rgb(lbl, img=None, label_names=None, n_labels=None,
               alpha=0.5, thresh_suppress=0):
+    """
+    Fill semantic segmentation label with class specific RGB color
+    If RGB image provided, it will overlay label on image 
+    """
     if label_names is None:
         if n_labels is None:
             n_labels = lbl.max() + 1  # +1 for bg_label 0
@@ -220,6 +223,7 @@ def label2rgb(lbl, img=None, label_names=None, n_labels=None,
             n_labels = len(label_names)
         else:
             assert n_labels == len(label_names)
+
     cmap = label_colormap(n_labels)
     cmap = (cmap * 255).astype(np.uint8)
 
@@ -249,7 +253,7 @@ def label2rgb(lbl, img=None, label_names=None, n_labels=None,
             continue  # unlabeled
 
         mask = lbl == label
-        if 1. * mask.sum() / mask.size < thresh_suppress:
+        if mask.sum() / mask.size < thresh_suppress:
             continue
         mask = (mask * 255).astype(np.uint8)
         y, x = scipy.ndimage.center_of_mass(mask)
@@ -276,30 +280,26 @@ def label2rgb(lbl, img=None, label_names=None, n_labels=None,
         cv2.putText(lbl_viz, text,
                     (x - text_size[0] // 2, y),
                     font_face, font_scale, color, thickness)
+    
     return lbl_viz
 
 
 def visualize_segmentation(**kwargs):
-    """Visualize segmentation.
+    """
+    Visualize segmentation.
 
-    Parameters
-    ----------
-    img: ndarray
-        Input image to predict label.
-    lbl_true: ndarray
-        Ground truth of the label.
-    lbl_pred: ndarray
-        Label predicted.
-    n_class: int
-        Number of classes.
-    label_names: dict or list
-        Names of each label value.
-        Key or index is label_value and value is its name.
+    Arguments:
+        img (H×W×C ndarray): input RGB image
+        lbl_true (ndarray): Ground truth of the label.
+        lbl_pred (H×W ndarray): predicted label
+        n_class (int): number of classes
+        label_names: dict or list
+            Names of each label value.
+            Key or index is label_value and value is its name.
 
-    Returns
-    -------
-    img_array: ndarray
-        Visualized image.
+    Returns:
+        img_array (ndarray): visualized image
+        ignore region will be filled with random color
     """
     img = kwargs.pop('img', None)
     lbl_true = kwargs.pop('lbl_true', None)
@@ -310,7 +310,7 @@ def visualize_segmentation(**kwargs):
         raise RuntimeError(
             'Unexpected keys in kwargs: {}'.format(kwargs.keys()))
 
-    if lbl_true is None and lbl_pred is None:
+    if lbl_true is None or lbl_pred is None:
         raise ValueError('lbl_true or lbl_pred must be not None.')
 
     lbl_true = copy.deepcopy(lbl_true)
