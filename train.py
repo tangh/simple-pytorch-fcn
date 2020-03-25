@@ -9,13 +9,15 @@ from models.fcn32s import fcn32s
 from models.fcn16s import fcn16s
 from models.fcn8s import fcn8s
 from utils import dataset, trainer
+from utils.misc import setup_logger
 
 
 parser = argparse.ArgumentParser(description="FCN Training With Pytorch")
 parser.add_argument("--model", type=str, default="fcn32s",
                     choices=["fcn32s", "fcn16s", "fcn8s"],
                     help="use which model (default: fcn32s)")
-parser.add_argument('--pretrained-model', default='./checkpoints/fcn32s/model_best.pth.tar',
+parser.add_argument('--pretrained-model',
+                    default='./checkpoints/fcn32s/model_best.pth.tar',
                     help='pretrained model')
 parser.add_argument('--max-iter', type=int, default=10000, help='max iter')
 parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
@@ -44,6 +46,8 @@ device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
 torch.manual_seed(1337)
 if device == "cuda":
     torch.cuda.manual_seed(1337)
+logger = setup_logger("simple-pytorch-fcn", args.save_dir)
+logger.info(args)
 
 
 # [1] dataset
@@ -81,7 +85,10 @@ best_mean_iou = 0
 
 if args.resume:
     checkpoint = torch.load(args.resume)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    # we dont save parameters in convtranspose since it is fixed
+    # and used as a bilinear upsample, so state_dict in checkpoint
+    # will miss some keys
+    model.load_state_dict(checkpoint["model_state_dict"], strict=False)
     start_epoch = checkpoint["epoch"]
     start_iteration = checkpoint["iteration"]
     best_mean_iou = checkpoint["best_mean_iou"]
@@ -93,12 +100,16 @@ else:
     elif args.model == "fcn16s":
         fcn32s_model = fcn32s(n_class=21)
         checkpoint = torch.load(args.pretrained_model)
-        fcn32s_model.load_state_dict(checkpoint["model_state_dict"])
+        fcn32s_model.load_state_dict(
+            checkpoint["model_state_dict"], strict=False
+        )
         model.copy_params_from_fcn32s(fcn32s_model)
     elif args.model == "fcn8s":
         fcn16s_model = fcn16s(n_class=21)
         checkpoint = torch.load(args.pretrained_model)
-        fcn16s_model.load_state_dict(checkpoint["model_state_dict"])
+        fcn16s_model.load_state_dict(
+            checkpoint["model_state_dict"], strict=False
+        )
         model.copy_params_from_fcn16s(fcn16s_model)
 
 

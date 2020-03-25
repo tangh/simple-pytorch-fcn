@@ -1,14 +1,24 @@
 import os
+import time
+import datetime
 import math
 import shutil
+import logging
 
-import fcn
 import tqdm
 import torch
 import skimage
-import numpy as np
 
+from .misc import MetricLogger
 from .metrics import label_accuracy_score
+from .visualization import visualize_segmentation, get_tile_image
+
+
+def exclude_convtranspose(state_dict):
+    for k, v in state_dict.items():
+        if "upscore" in k:
+            del state_dict[k]
+    return state_dict
 
 
 class Trainer(object):
@@ -54,9 +64,6 @@ class Trainer(object):
 
             # loss = cross_entropy2d(score, target,
             #                        size_average=self.size_average)
-            # loss_data = loss.data.item()
-            # if np.isnan(loss_data):
-            #     raise ValueError('loss is nan while validating')
             # val_loss += loss_data / len(data)
             loss = self.criterion(prediction, target)
             val_loss += loss
@@ -71,30 +78,29 @@ class Trainer(object):
                 label_trues.append(lt)
                 label_preds.append(lp)
                 if len(visualizations) < 9:
-                    viz = fcn.utils.visualize_segmentation(
-                        lbl_pred=lp, lbl_true=lt, img=im, n_class=n_class)
+                    # viz = fcn.utils.visualize_segmentation(
+                    #     lbl_pred=lp, lbl_true=lt, img=im, n_class=n_class)
+                    viz = visualize_segmentation(
+                        lbl_pred=lp, lbl_true=lt, img=im, n_class=n_class
+                    )
                     visualizations.append(viz)
-            # if batch_idx % 200 == 0:
-            #     print("val on batch id:", batch_idx)
+
         metrics = label_accuracy_score(label_trues, label_preds, n_class)
 
         out = os.path.join(self.save_dir, 'visualization_viz')
         if not os.path.exists(out):
             os.mkdir(out)
         out_file = os.path.join(out, 'iter%012d.jpg' % self.iteration)
-        skimage.io.imsave(out_file, fcn.utils.get_tile_image(visualizations))
+        skimage.io.imsave(out_file, get_tile_image(visualizations))
 
         val_loss /= len(self.val_loader)
-        print("metrics and loss", metrics, val_loss.item())
 
-        # with open(osp.join(self.out, 'log.csv'), 'a') as f:
-        #     elapsed_time = (
-        #         datetime.datetime.now(pytz.timezone('Asia/Tokyo')) -
-        #         self.timestamp_start).total_seconds()
-        #     log = [self.epoch, self.iteration] + [''] * 5 + \
-        #           [val_loss] + list(metrics) + [elapsed_time]
-        #     log = map(str, log)
-        #     f.write(','.join(log) + '\n')
+        self.logger.info(
+            "  ".join(["val loss: {loss}", "{meterics}"]).format(
+                loss=val_loss.item(),
+                meterics=metrics
+            )
+        )
 
         mean_iu = metrics[2]
         is_best = mean_iu > self.best_mean_iou
@@ -105,7 +111,7 @@ class Trainer(object):
             'iteration': self.iteration,
             'arch': self.model.__class__.__name__,
             'optim_state_dict': self.optimizer.state_dict(),
-            'model_state_dict': self.model.state_dict(),
+            'model_state_dict': exclude_convtranspose(self.model.state_dict()),
             'best_mean_iou': self.best_mean_iou,
         }, os.path.join(self.save_dir, 'checkpoint.pth.tar'))
         if is_best:
@@ -118,7 +124,8 @@ class Trainer(object):
     def train_epoch(self):
         self.model.train()
         n_class = len(self.train_loader.dataset.class_names)
-        running_loss = 0
+        meters = MetricLogger(delimiter="  ")
+        end = time.time()
 
         for batch_idx, (img, target) in enumerate(self.train_loader):
 
@@ -135,47 +142,48 @@ class Trainer(object):
             # training
             img, target = img.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
-            # score = self.model(data)
             prediction = self.model(img)
             # loss = cross_entropy2d(score, target,
             #                        size_average=self.size_average)
             # loss /= len(data)
             # loss_data = loss.data.item()
-            # if np.isnan(loss_data):
-            #     raise ValueError('loss is nan while training')
+
             loss = self.criterion(prediction, target)
             loss.backward()
             self.optimizer.step()
 
-            metrics = []
-            # lbl_pred = score.data.max(1)[1].cpu().numpy()[:, :, :]
-            # lbl_true = target.data.cpu().numpy()
-            # acc, acc_cls, mean_iu, fwavacc = \
-            #     torchfcn.utils.label_accuracy_score(
-            #         lbl_true, lbl_pred, n_class=n_class)
+            # update meters
             acc, acc_cls, mean_iu, fwavacc = label_accuracy_score(
                 target.cpu().numpy(), prediction.max(dim=1)[1].cpu().numpy(),
                 n_class=n_class
             )
-            metrics.append((acc, acc_cls, mean_iu, fwavacc))
-            metrics = np.mean(metrics, axis=0)
+            current_batch_metrics = {
+                "loss": loss.item(), "pixel_acc": acc,
+                "mean_acc": acc_cls, "mean_iou": mean_iu, "fw_iou": fwavacc
+            }
+            meters.update(**current_batch_metrics)
 
-            running_loss += loss.item()
-            if batch_idx % 20 == 0:
-                print("Training on [epoch{}/iter{}]: loss/average loss = {}/{}, \
-                    metrics[acc,acc_cls,miou,fwavacc] = {}".format(
-                    self.epoch, self.iteration,
-                    loss.item(), running_loss/(batch_idx+1), metrics.tolist()
-                ))
+            batch_time = time.time() - end
+            end = time.time()
+            meters.update(time=batch_time)
 
-            # with open(osp.join(self.out, 'log.csv'), 'a') as f:
-            #     elapsed_time = (
-            #         datetime.datetime.now(pytz.timezone('Asia/Tokyo')) -
-            #         self.timestamp_start).total_seconds()
-            #     log = [self.epoch, self.iteration] + [loss_data] + \
-            #         metrics.tolist() + [''] * 5 + [elapsed_time]
-            #     log = map(str, log)
-            #     f.write(','.join(log) + '\n')
+            eta_seconds = meters.time.global_avg * \
+                (self.max_iter - self.iteration)
+            eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+
+            if self.iteration % 20 == 0 or self.iteration == self.max_iter:
+                self.logger.info(
+                    meters.delimiter.join(
+                        ["eta: {eta}", "epoch: {epoch}", "iter: {iter}",
+                         "{meters}", "current batch: {current_meters}"]
+                    ).format(
+                        eta=eta_string,
+                        epoch=self.epoch,
+                        iter=self.iteration,
+                        meters=str(meters),
+                        current_meters=str(current_batch_metrics)
+                    )
+                )
 
             if self.iteration >= self.max_iter:
                 if self.iteration % self.validate_interval != 0:
@@ -183,6 +191,8 @@ class Trainer(object):
                 break
 
     def train(self):
+        self.logger = logging.getLogger("simple-pytorch-fcn.trainer")
+        self.logger.info("Start training")
         max_epoch = int(math.ceil(self.max_iter / len(self.train_loader)))
         for epoch in range(self.epoch, max_epoch):
             self.epoch = epoch
