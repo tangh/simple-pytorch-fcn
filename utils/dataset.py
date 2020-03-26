@@ -33,7 +33,8 @@ class VOCClassSegBase(data.Dataset):
         'train',
         'tv/monitor',
     ])
-    mean_bgr = np.array([104.00699, 116.66877, 122.67892])
+    # mean_bgr = np.array([104.00699, 116.66877, 122.67892])
+    mean_bgr = np.array([103.939, 116.779, 123.68])
 
     def __init__(self, root, split='train', transform=False):
         self.root = root

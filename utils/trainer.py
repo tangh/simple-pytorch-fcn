@@ -46,6 +46,16 @@ class Trainer(object):
         self.best_mean_iou = 0
 
     def validate(self):
+
+        torch.save({
+            "epoch": self.epoch,
+            "iteration": self.iteration,
+            "arch": self.model.__class__.__name__,
+            "optim_state_dict": self.optimizer.state_dict(),
+            "model_state_dict": exclude_convtranspose(self.model.state_dict()),
+            "best_mean_iou": self.best_mean_iou,
+        }, os.path.join(self.save_dir, "checkpoint.pth.tar"))
+
         training = self.model.training
         self.model.eval()
         n_class = len(self.val_loader.dataset.class_names)
@@ -103,15 +113,6 @@ class Trainer(object):
         is_best = mean_iu > self.best_mean_iou
         if is_best:
             self.best_mean_iou = mean_iu
-        torch.save({
-            'epoch': self.epoch,
-            'iteration': self.iteration,
-            'arch': self.model.__class__.__name__,
-            'optim_state_dict': self.optimizer.state_dict(),
-            'model_state_dict': exclude_convtranspose(self.model.state_dict()),
-            'best_mean_iou': self.best_mean_iou,
-        }, os.path.join(self.save_dir, 'checkpoint.pth.tar'))
-        if is_best:
             shutil.copy(os.path.join(self.save_dir, 'checkpoint.pth.tar'),
                         os.path.join(self.save_dir, 'model_best.pth.tar'))
 

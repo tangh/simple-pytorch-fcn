@@ -1,4 +1,5 @@
 import argparse
+from collections import OrderedDict
 import os
 
 import torch
@@ -95,7 +96,16 @@ if args.resume:
 else:
     if args.model == "fcn32s":
         import torchvision
-        vgg16 = torchvision.models.vgg16(pretrained=True)
+        vgg16 = torchvision.models.vgg16()
+        checkpoint = torch.load(args.pretrained_model)
+        checkpoint = OrderedDict(
+            [
+                (k.replace(k.split(".")[1], str(int(k.split(".")[1])-1)), v)
+                if "classifier" in k 
+                else (k, v) for k, v in checkpoint.items()
+            ]
+        )
+        vgg16.load_state_dict(checkpoint, strict=False)
         model.copy_params_from_vgg16(vgg16)
     elif args.model == "fcn16s":
         fcn32s_model = fcn32s(n_class=21)
