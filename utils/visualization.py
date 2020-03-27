@@ -1,13 +1,8 @@
 import copy
 from distutils.version import LooseVersion
 import math
-import warnings
 
-try:
-    import cv2
-except ImportError:
-    cv2 = None
-
+import cv2
 import numpy as np
 import scipy.ndimage
 import skimage
@@ -15,33 +10,8 @@ import skimage.color
 import skimage.transform
 
 
-# -----------------------------------------------------------------------------
-# Chainer Util
-# -----------------------------------------------------------------------------
-
-
-def batch_to_vars(batch, device=-1):
-    import chainer
-    from chainer import cuda
-    in_arrays = [np.asarray(x) for x in zip(*batch)]
-    if device >= 0:
-        in_arrays = [cuda.to_gpu(x, device=device) for x in in_arrays]
-    in_vars = [chainer.Variable(x) for x in in_arrays]
-    return in_vars
-
-
-# -----------------------------------------------------------------------------
-# Color Util
-# -----------------------------------------------------------------------------
-
 def bitget(byteval, idx):
     return ((byteval & (1 << idx)) != 0)
-
-
-def labelcolormap(*args, **kwargs):
-    warnings.warn('labelcolormap is renamed to label_colormap.',
-                  DeprecationWarning)
-    return label_colormap(*args, **kwargs)
 
 
 def label_colormap(N=256):
@@ -61,44 +31,6 @@ def label_colormap(N=256):
     return cmap
 
 
-def visualize_labelcolormap(*args, **kwargs):
-    warnings.warn(
-        'visualize_labelcolormap is renamed to visualize_label_colormap',
-        DeprecationWarning)
-    return visualize_label_colormap(*args, **kwargs)
-
-
-def visualize_label_colormap(cmap):
-    n_colors = len(cmap)
-    ret = np.zeros((n_colors, 10 * 10, 3))
-    for i in range(n_colors):
-        ret[i, ...] = cmap[i]
-    return ret.reshape((n_colors * 10, 10, 3))
-
-
-def get_label_colortable(n_labels, shape):
-    if cv2 is None:
-        raise RuntimeError('get_label_colortable requires OpenCV (cv2)')
-    rows, cols = shape
-    if rows * cols < n_labels:
-        raise ValueError
-    cmap = label_colormap(n_labels)
-    table = np.zeros((rows * cols, 50, 50, 3), dtype=np.uint8)
-    for lbl_id, color in enumerate(cmap):
-        color_uint8 = (color * 255).astype(np.uint8)
-        table[lbl_id, :, :] = color_uint8
-        text = '{:<2}'.format(lbl_id)
-        cv2.putText(table[lbl_id], text, (5, 35),
-                    cv2.cv.CV_FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 3)
-    table = table.reshape(rows, cols, 50, 50, 3)
-    table = table.transpose(0, 2, 1, 3, 4)
-    table = table.reshape(rows * 50, cols * 50, 3)
-    return table
-
-
-# -----------------------------------------------------------------------------
-# Visualization
-# -----------------------------------------------------------------------------
 def centerize(src, dst_shape, margin_color=None):
     """Centerize image for specified image size
 
@@ -156,13 +88,12 @@ def _tile_images(imgs, tile_shape, concatenated_image):
 
 
 def get_tile_image(imgs, tile_shape=None, result_img=None, margin_color=None):
-    """
-    Concatenate images whose sizes are different.
-    
+    """Concatenate images whose sizes are different.
+
     Arguments:
         imgs (list[ndarray]): image list to be concatenated
-        @param tile_shape: shape for which images should be concatenated
-        @param result_img: numpy array to put result image
+        tile_shape: shape for which images should be concatenated
+        result_img: numpy array to put result image
     """
     def resize(*args, **kwargs):
         # anti_aliasing arg cannot be passed to skimage<0.14
@@ -209,11 +140,25 @@ def get_tile_image(imgs, tile_shape=None, result_img=None, margin_color=None):
     return _tile_images(imgs, tile_shape, result_img)
 
 
-def label2rgb(lbl, img=None, label_names=None, n_labels=None,
-              alpha=0.5, thresh_suppress=0):
+def label2rgb(
+    lbl, img=None, label_names=None, n_labels=None, ignore_index=-1,
+    alpha=0.5, thresh_suppress=0.01
+):
     """
-    Fill semantic segmentation label with class specific RGB color
-    If RGB image provided, it will overlay label on image 
+    Fill semantic segmentation label with class specific RGB color.
+    If RGB image provided, it will overlay label on image.
+
+    Arguments:
+        lbl (H×W ndarray): single GT or Prediction label.
+        img (H×W×C ndarray) : single original input image.
+        label_names (dict or list): names of each label value.
+            Key or index is label_value or name of corresponding value.
+        n_labels (int): number of classes in label.
+        ignore_index (int): value of ignore regions in GT, default is -1.
+        alpha (float number between 0 and 1): alpha value used for overlay
+            label on image, if `img` provided.
+        thresh_suppress (float number between 0 and 1): ignore a label whose
+            area proportion under this threshold when putting text.
     """
     if label_names is None:
         if n_labels is None:
@@ -228,7 +173,7 @@ def label2rgb(lbl, img=None, label_names=None, n_labels=None,
     cmap = (cmap * 255).astype(np.uint8)
 
     lbl_viz = cmap[lbl]
-    lbl_viz[lbl == -1] = (0, 0, 0)  # unlabeled
+    lbl_viz[lbl == ignore_index] = (255, 255, 255)  # unlabeled
 
     if img is not None:
         img_gray = skimage.color.rgb2gray(img)
@@ -240,24 +185,17 @@ def label2rgb(lbl, img=None, label_names=None, n_labels=None,
     if label_names is None:
         return lbl_viz
 
-    # cv2 is required only if label_names is not None
-    import cv2
-    if cv2 is None:
-        warnings.warn('label2rgb with label_names requires OpenCV (cv2), '
-                      'so ignoring label_names values.')
-        return lbl_viz
-
+    # put label names
     np.random.seed(1234)
     for label in np.unique(lbl):
-        if label == -1:
-            continue  # unlabeled
+        if label == ignore_index:
+            continue
 
         mask = lbl == label
         if mask.sum() / mask.size < thresh_suppress:
             continue
         mask = (mask * 255).astype(np.uint8)
-        y, x = scipy.ndimage.center_of_mass(mask)
-        y, x = map(int, [y, x])
+        y, x = map(int, scipy.ndimage.center_of_mass(mask))
 
         if lbl[y, x] != label:
             Y, X = np.where(mask)
@@ -277,80 +215,68 @@ def label2rgb(lbl, img=None, label_names=None, n_labels=None,
             return (255, 255, 255)
 
         color = get_text_color(lbl_viz[y, x])
-        cv2.putText(lbl_viz, text,
-                    (x - text_size[0] // 2, y),
-                    font_face, font_scale, color, thickness)
-    
+        cv2.putText(
+            lbl_viz, text, (x - text_size[0] // 2, y),
+            font_face, font_scale, color, thickness
+        )
+
     return lbl_viz
 
 
-def visualize_segmentation(**kwargs):
-    """
-    Visualize segmentation.
+def visualize_segmentation(
+    img, lbl_pred, lbl_true, n_class, label_names=None, ignore_index=-1
+):
+    """Visualize segmentation.
 
     Arguments:
-        img (H×W×C ndarray): input RGB image
-        lbl_true (ndarray): Ground truth of the label.
-        lbl_pred (H×W ndarray): predicted label
-        n_class (int): number of classes
-        label_names: dict or list
-            Names of each label value.
-            Key or index is label_value and value is its name.
+        img (H×W×C ndarray): input RGB image.
+        lbl_true (H×W ndarray): Ground Truth of the label.
+        lbl_pred (H×W ndarray): predicted label.
+        n_class (int): number of classes.
+        label_names (dict or list): names of each label value.
+            Key or index is label_value or name of corresponding value.
+        ignore_index (int): value of ignore regions in GT, default is -1.
 
     Returns:
-        img_array (ndarray): visualized image
-        ignore region will be filled with random color
+        img_array (ndarray): visualized image.
+        (ignore region will be filled with random colors)
     """
-    img = kwargs.pop('img', None)
-    lbl_true = kwargs.pop('lbl_true', None)
-    lbl_pred = kwargs.pop('lbl_pred', None)
-    n_class = kwargs.pop('n_class', None)
-    label_names = kwargs.pop('label_names', None)
-    if kwargs:
-        raise RuntimeError(
-            'Unexpected keys in kwargs: {}'.format(kwargs.keys()))
 
     if lbl_true is None or lbl_pred is None:
         raise ValueError('lbl_true or lbl_pred must be not None.')
-
-    lbl_true = copy.deepcopy(lbl_true)
     lbl_pred = copy.deepcopy(lbl_pred)
+    lbl_true = copy.deepcopy(lbl_true)
 
+    # fill ignore region with random colors
     mask_unlabeled = None
     viz_unlabeled = None
-    if lbl_true is not None:
-        mask_unlabeled = lbl_true == -1
-        lbl_true[mask_unlabeled] = 0
-        viz_unlabeled = (
-            np.random.random((lbl_true.shape[0], lbl_true.shape[1], 3)) * 255
-        ).astype(np.uint8)
-        if lbl_pred is not None:
-            lbl_pred[mask_unlabeled] = 0
+    mask_unlabeled = lbl_true == ignore_index
+    lbl_true[mask_unlabeled] = 0
+    lbl_pred[mask_unlabeled] = 0
+    viz_unlabeled = (
+        np.random.random((lbl_true.shape[0], lbl_true.shape[1], 3)) * 255
+    ).astype(np.uint8)
 
+    # colorize GT and prediction, and tile them together
     vizs = []
+    viz_trues = [
+        img,
+        label2rgb(lbl_true, label_names=label_names, n_labels=n_class),
+        label2rgb(lbl_true, img, label_names=label_names, n_labels=n_class)
+    ]
+    viz_trues[1][mask_unlabeled] = viz_unlabeled[mask_unlabeled]
+    viz_trues[2][mask_unlabeled] = viz_unlabeled[mask_unlabeled]
+    vizs.append(get_tile_image(viz_trues, (1, 3)))
 
-    if lbl_true is not None:
-        viz_trues = [
-            img,
-            label2rgb(lbl_true, label_names=label_names, n_labels=n_class),
-            label2rgb(lbl_true, img, label_names=label_names,
-                      n_labels=n_class),
-        ]
-        viz_trues[1][mask_unlabeled] = viz_unlabeled[mask_unlabeled]
-        viz_trues[2][mask_unlabeled] = viz_unlabeled[mask_unlabeled]
-        vizs.append(get_tile_image(viz_trues, (1, 3)))
-
-    if lbl_pred is not None:
-        viz_preds = [
-            img,
-            label2rgb(lbl_pred, label_names=label_names, n_labels=n_class),
-            label2rgb(lbl_pred, img, label_names=label_names,
-                      n_labels=n_class),
-        ]
-        if mask_unlabeled is not None and viz_unlabeled is not None:
-            viz_preds[1][mask_unlabeled] = viz_unlabeled[mask_unlabeled]
-            viz_preds[2][mask_unlabeled] = viz_unlabeled[mask_unlabeled]
-        vizs.append(get_tile_image(viz_preds, (1, 3)))
+    viz_preds = [
+        img,
+        label2rgb(lbl_pred, label_names=label_names, n_labels=n_class),
+        label2rgb(lbl_pred, img, label_names=label_names, n_labels=n_class)
+    ]
+    if mask_unlabeled is not None and viz_unlabeled is not None:
+        viz_preds[1][mask_unlabeled] = viz_unlabeled[mask_unlabeled]
+        viz_preds[2][mask_unlabeled] = viz_unlabeled[mask_unlabeled]
+    vizs.append(get_tile_image(viz_preds, (1, 3)))
 
     if len(vizs) == 1:
         return vizs[0]
@@ -358,3 +284,15 @@ def visualize_segmentation(**kwargs):
         return get_tile_image(vizs, (2, 1))
     else:
         raise RuntimeError
+
+
+def visualize_demo(img, prediction, n_class, label_names=None):
+
+    prediction = copy.deepcopy(prediction)
+    visualiztion = [
+        img,
+        label2rgb(prediction, label_names=label_names, n_labels=n_class),
+        label2rgb(prediction, img, label_names=label_names, n_labels=n_class)
+    ]
+
+    return(get_tile_image(visualiztion, (1, 3)))

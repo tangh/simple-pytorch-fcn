@@ -14,23 +14,17 @@ from .metrics import label_accuracy_score
 from .visualization import visualize_segmentation, get_tile_image
 
 
-def exclude_convtranspose(state_dict):
-    for k, v in state_dict.items():
-        if "upscore" in k:
-            del state_dict[k]
-    return state_dict
-
-
 class Trainer(object):
 
     def __init__(
-        self, device, model, criterion, optimizer, train_loader, val_loader,
-        save_dir, max_iter, validate_interval=None
+        self, device, model, criterion, optimizer, scheduler,
+        train_loader, val_loader, save_dir, max_iter, validate_interval=None
     ):
         self.device = device
         self.model = model.to(device)
         self.criterion = criterion.to(device)
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.train_loader = train_loader
         self.val_loader = val_loader
         if validate_interval is None:
@@ -52,7 +46,7 @@ class Trainer(object):
             "iteration": self.iteration,
             "arch": self.model.__class__.__name__,
             "optim_state_dict": self.optimizer.state_dict(),
-            "model_state_dict": exclude_convtranspose(self.model.state_dict()),
+            "model_state_dict": self.model.state_dict(),
             "best_mean_iou": self.best_mean_iou,
         }, os.path.join(self.save_dir, "checkpoint.pth.tar"))
 
@@ -88,7 +82,8 @@ class Trainer(object):
                 label_preds.append(lp)
                 if len(visualizations) < 9:
                     viz = visualize_segmentation(
-                        lbl_pred=lp, lbl_true=lt, img=im, n_class=n_class
+                        img=im, lbl_pred=lp, lbl_true=lt, n_class=n_class,
+                        label_names=self.val_loader.dataset.class_names
                     )
                     visualizations.append(viz)
 
@@ -133,10 +128,6 @@ class Trainer(object):
                 continue
             self.iteration = iteration
 
-            # val
-            if self.iteration % self.validate_interval == 0:
-                self.validate()
-
             # training
             img, target = img.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
@@ -149,6 +140,8 @@ class Trainer(object):
             loss = self.criterion(prediction, target)
             loss.backward()
             self.optimizer.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
 
             # update meters
             acc, acc_cls, mean_iu, fwavacc = label_accuracy_score(
@@ -172,16 +165,24 @@ class Trainer(object):
             if self.iteration % 20 == 0 or self.iteration == self.max_iter:
                 self.logger.info(
                     meters.delimiter.join(
-                        ["eta: {eta}", "epoch: {epoch}", "iter: {iter}",
-                         "{meters}", "current batch: {current_meters}"]
+                        [
+                            "eta: {eta}", "epoch: {epoch}", "iter: {iter}",
+                            "lr: {lr:.6f}", "{meters}",
+                            "current batch: {current_meters}"
+                        ]
                     ).format(
                         eta=eta_string,
                         epoch=self.epoch,
                         iter=self.iteration,
+                        lr=self.optimizer.param_groups[0]["lr"],
                         meters=str(meters),
                         current_meters=str(current_batch_metrics)
                     )
                 )
+
+            # val
+            if self.iteration % self.validate_interval == 0:
+                self.validate()
 
             if self.iteration >= self.max_iter:
                 if self.iteration % self.validate_interval != 0:

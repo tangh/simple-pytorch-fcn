@@ -11,16 +11,17 @@ from models.fcn16s import fcn16s
 from models.fcn8s import fcn8s
 from utils import dataset, trainer
 from utils.misc import setup_logger
+from utils.solver import WarmupMultiStepLR
 
 
 parser = argparse.ArgumentParser(description="FCN Training With Pytorch")
 parser.add_argument("--model", type=str, default="fcn32s",
                     choices=["fcn32s", "fcn16s", "fcn8s"],
                     help="use which model (default: fcn32s)")
-parser.add_argument('--pretrained-model',
+parser.add_argument('--pretrained-model', metavar='P',
                     default='./checkpoints/fcn32s/model_best.pth.tar',
                     help='pretrained model')
-parser.add_argument('--max-iter', type=int, default=10000, help='max iter')
+parser.add_argument('--max-iter', type=int, default=20000, help='max iter')
 parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
                     help='learning rate (default: 1e-4)')
 parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
@@ -34,13 +35,15 @@ parser.add_argument('--dataset', type=str, default='voc',
                     help='use which dataset (default: voc2012)')
 parser.add_argument('--dataset-root', default='./datasets',
                     help='Directory for datasets')
-parser.add_argument('--save-dir', default='./checkpoints',
+parser.add_argument('--save-dir', default='./checkpoints', metavar='S',
                     help='Directory for saving checkpoints')
 parser.add_argument('--resume', help='resume training from checkpoint path')
 args = parser.parse_args()
 
 
-# [0] prepare envs
+# ---------------------------------------------------------------------------- #
+# prepare envs
+# ---------------------------------------------------------------------------- #
 if not os.path.exists(args.save_dir):
     os.mkdir(args.save_dir)
 device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
@@ -51,7 +54,9 @@ logger = setup_logger("simple-pytorch-fcn", args.save_dir)
 logger.info(args)
 
 
-# [1] dataset
+# ---------------------------------------------------------------------------- #
+# build dataset
+# ---------------------------------------------------------------------------- #
 if args.dataset == "voc":
     train_loader = DataLoader(
         dataset.VOCClassSegBase(root=args.dataset_root, split="train"),
@@ -72,7 +77,9 @@ elif args.dataset == "sbd":
     )
 
 
-# [2] network
+# ---------------------------------------------------------------------------- #
+# build network
+# ---------------------------------------------------------------------------- #
 if args.model == "fcn32s":
     model = fcn32s(n_class=21)
 elif args.model == "fcn16s":
@@ -86,10 +93,7 @@ best_mean_iou = 0
 
 if args.resume:
     checkpoint = torch.load(args.resume)
-    # we dont save parameters in convtranspose since it is fixed
-    # and used as a bilinear upsample, so state_dict in checkpoint
-    # will miss some keys
-    model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+    model.load_state_dict(checkpoint["model_state_dict"])
     start_epoch = checkpoint["epoch"]
     start_iteration = checkpoint["iteration"]
     best_mean_iou = checkpoint["best_mean_iou"]
@@ -110,20 +114,18 @@ else:
     elif args.model == "fcn16s":
         fcn32s_model = fcn32s(n_class=21)
         checkpoint = torch.load(args.pretrained_model)
-        fcn32s_model.load_state_dict(
-            checkpoint["model_state_dict"], strict=False
-        )
+        fcn32s_model.load_state_dict(checkpoint["model_state_dict"])
         model.copy_params_from_fcn32s(fcn32s_model)
     elif args.model == "fcn8s":
         fcn16s_model = fcn16s(n_class=21)
         checkpoint = torch.load(args.pretrained_model)
-        fcn16s_model.load_state_dict(
-            checkpoint["model_state_dict"], strict=False
-        )
+        fcn16s_model.load_state_dict(checkpoint["model_state_dict"])
         model.copy_params_from_fcn16s(fcn16s_model)
 
 
-# [3] optimizer
+# ---------------------------------------------------------------------------- #
+# build optimizer
+# ---------------------------------------------------------------------------- #
 def get_parameters(model, bias=False):
     for m in model.modules():
         if isinstance(m, nn.Conv2d):
@@ -149,15 +151,20 @@ if args.resume:
             if torch.is_tensor(v):
                 state[k] = v.cuda()
 
+scheduler = WarmupMultiStepLR(optimizer, [])
+
 criterion = nn.CrossEntropyLoss(ignore_index=-1)
 
 
-# [4] training
+# ---------------------------------------------------------------------------- #
+# strat training
+# ---------------------------------------------------------------------------- #
 fcn_trainer = trainer.Trainer(
     device=device,
     model=model,
     criterion=criterion,
     optimizer=optimizer,
+    scheduler=scheduler,
     train_loader=train_loader,
     val_loader=val_loader,
     save_dir=args.save_dir,

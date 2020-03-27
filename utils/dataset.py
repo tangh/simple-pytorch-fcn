@@ -8,7 +8,7 @@ import torch
 from torch.utils import data
 
 
-class VOCClassSegBase(data.Dataset):
+class VOCConfigs(data.Dataset):
 
     class_names = np.array([
         '__background__',
@@ -35,6 +35,9 @@ class VOCClassSegBase(data.Dataset):
     ])
     # mean_bgr = np.array([104.00699, 116.66877, 122.67892])
     mean_bgr = np.array([103.939, 116.779, 123.68])
+
+
+class VOCClassSegBase(VOCConfigs):
 
     def __init__(self, root, split='train', transform=False):
         self.root = root
