@@ -21,10 +21,11 @@ Run `python train.py --model fcn32s --dataset voc --max-iter 20000 --save-dir ./
 **Arguments:**
 + `--model`: `fcn32s` or `fcn16s` or `fcn8s`.
 + `--pretrained-model`: Path to a pretrained checkpoint. fcn16s(fcn8s) need to initialize from fcn32s(fcn16s) pretrained model. fcn32s need to initialize from VGG pretrained model.
++ `--batch-size`: Batch size of train or val. If set to 1, image and label will be returned as is, otherwise image and label will be resized to 500×500.
 + `--max-iter`: Max training iterations, max epoch will be auto calculate by `max-iter / batchsize`.
 + `--lr`, `--momentum`, `--weight-decay`: Optimizer configs, lr for bias will double.
 + `--cuda`: Whether to use GPU training.
-+ `--dataset`: Use [VOC 2012 Dataset](http://host.robots.ox.ac.uk/pascal/VOC/voc2012/) ( /1449val) or [SBD Dataset](http://home.bharathh.info/home/sbd) (/736val).
++ `--dataset`: Use [VOC 2012 Dataset](http://host.robots.ox.ac.uk/pascal/VOC/voc2012/) (1464train/1449val) or [SBD Dataset](http://home.bharathh.info/home/sbd) (8498train/736val).
 + `--dataset-root`: Path to dataset.
 + `--save-dir`: Path to save checkpoints, visulized results, and log file.
 + `--resume`: Path to a checkpoint file used to resume training process.

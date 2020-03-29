@@ -7,7 +7,7 @@ import logging
 
 import tqdm
 import torch
-import skimage.io
+import cv2
 
 from .misc import MetricLogger
 from .metrics import label_accuracy_score
@@ -41,15 +41,6 @@ class Trainer(object):
 
     def validate(self):
 
-        torch.save({
-            "epoch": self.epoch,
-            "iteration": self.iteration,
-            "arch": self.model.__class__.__name__,
-            "optim_state_dict": self.optimizer.state_dict(),
-            "model_state_dict": self.model.state_dict(),
-            "best_mean_iou": self.best_mean_iou,
-        }, os.path.join(self.save_dir, "checkpoint.pth.tar"))
-
         training = self.model.training
         self.model.eval()
         n_class = len(self.val_loader.dataset.class_names)
@@ -65,17 +56,13 @@ class Trainer(object):
             img, target = img.to(self.device), target.to(self.device)
             with torch.no_grad():
                 prediction = self.model(img)
+            val_loss += self.criterion(prediction, target)
 
-            # loss = cross_entropy2d(score, target,
-            #                        size_average=self.size_average)
-            # val_loss += loss_data / len(data)
-            loss = self.criterion(prediction, target)
-            val_loss += loss
-
+            # visulization
             imgs = img.data.cpu()
-            prediction = torch.nn.functional.softmax(prediction, dim=1)
-            lbl_pred = prediction.data.max(1)[1].cpu().numpy()[:, :, :]
             lbl_true = target.data.cpu()
+            lbl_pred = prediction.data.argmax(dim=1).cpu().numpy()
+
             for im, lt, lp in zip(imgs, lbl_true, lbl_pred):
                 im, lt = self.val_loader.dataset.to_numpy(im, lt)
                 label_trues.append(lt)
@@ -93,23 +80,38 @@ class Trainer(object):
         if not os.path.exists(out):
             os.mkdir(out)
         out_file = os.path.join(out, 'iter%012d.jpg' % self.iteration)
-        skimage.io.imsave(out_file, get_tile_image(visualizations))
+        cv2.imwrite(out_file, get_tile_image(visualizations)[:, :, ::-1])
 
-        val_loss /= len(self.val_loader)
+        val_loss = val_loss.item() / len(self.val_loader)
 
         self.logger.info(
             "  ".join(["val loss: {loss}", "{meterics}"]).format(
-                loss=val_loss.item(),
+                loss=val_loss,
                 meterics=metrics
             )
         )
 
-        mean_iu = metrics[2]
-        is_best = mean_iu > self.best_mean_iou
+        # update best mIoU and save best model
+        mean_iou = metrics[2]
+        is_best = mean_iou > self.best_mean_iou
         if is_best:
-            self.best_mean_iou = mean_iu
-            shutil.copy(os.path.join(self.save_dir, 'checkpoint.pth.tar'),
-                        os.path.join(self.save_dir, 'model_best.pth.tar'))
+            self.best_mean_iou = mean_iou
+        checkpoint = {
+            "epoch": self.epoch,
+            "iteration": self.iteration,
+            "arch": self.model.__class__.__name__,
+            "optim_state_dict": self.optimizer.state_dict(),
+            "model_state_dict": self.model.state_dict(),
+            "best_mean_iou": self.best_mean_iou,
+        }
+        if self.scheduler is not None:
+            checkpoint.update(
+                {"scheduler_state_dict": self.scheduler.state_dict()}
+            )
+        torch.save(checkpoint, os.path.join(self.save_dir, "checkpoint.pth.tar"))
+        if is_best:
+            shutil.copy(os.path.join(self.save_dir, "checkpoint.pth.tar"),
+                        os.path.join(self.save_dir, "model_best.pth.tar"))
 
         if training:
             self.model.train()
@@ -123,7 +125,7 @@ class Trainer(object):
         for batch_idx, (img, target) in enumerate(self.train_loader):
 
             # resume
-            iteration = batch_idx + self.epoch * len(self.train_loader)
+            iteration = batch_idx + self.epoch * len(self.train_loader) + 1
             if self.iteration != 0 and (iteration - 1) != self.iteration:
                 continue
             self.iteration = iteration
@@ -132,11 +134,6 @@ class Trainer(object):
             img, target = img.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
             prediction = self.model(img)
-            # loss = cross_entropy2d(score, target,
-            #                        size_average=self.size_average)
-            # loss /= len(data)
-            # loss_data = loss.data.item()
-
             loss = self.criterion(prediction, target)
             loss.backward()
             self.optimizer.step()
@@ -145,7 +142,7 @@ class Trainer(object):
 
             # update meters
             acc, acc_cls, mean_iu, fwavacc = label_accuracy_score(
-                target.cpu().numpy(), prediction.max(dim=1)[1].cpu().numpy(),
+                target.cpu().numpy(), prediction.argmax(dim=1).cpu().numpy(),
                 n_class=n_class
             )
             current_batch_metrics = {
@@ -162,12 +159,13 @@ class Trainer(object):
                 (self.max_iter - self.iteration)
             eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
 
+            # logging
             if self.iteration % 20 == 0 or self.iteration == self.max_iter:
                 self.logger.info(
                     meters.delimiter.join(
                         [
                             "eta: {eta}", "epoch: {epoch}", "iter: {iter}",
-                            "lr: {lr:.6f}", "{meters}",
+                            "lr: {lr:.1e}", "{meters}",
                             "current batch: {current_meters}"
                         ]
                     ).format(
@@ -192,6 +190,15 @@ class Trainer(object):
     def train(self):
         self.logger = logging.getLogger("simple-pytorch-fcn.trainer")
         self.logger.info("Start training")
+
+        if self.iteration == 0:
+            self.validate()
+            self.iteration += 1
+
+        # resume
+        if self.iteration % len(self.train_loader) == 0:
+            self.epoch += 1
+
         max_epoch = int(math.ceil(self.max_iter / len(self.train_loader)))
         for epoch in range(self.epoch, max_epoch):
             self.epoch = epoch

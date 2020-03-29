@@ -33,16 +33,19 @@ class VOCConfigs(data.Dataset):
         'train',
         'tv/monitor',
     ])
+
+    _VOC_BASE_SIZE = 500
+
     # mean_bgr = np.array([104.00699, 116.66877, 122.67892])
     mean_bgr = np.array([103.939, 116.779, 123.68])
 
 
 class VOCClassSegBase(VOCConfigs):
 
-    def __init__(self, root, split='train', transform=False):
+    def __init__(self, root, split='train', resize=False):
         self.root = root
         self.split = split
-        self._transform = transform
+        self._resize = resize
 
         # VOC2011 and others are subset of VOC2012
         dataset_dir = os.path.join(self.root, 'VOCdevkit/VOC2012')
@@ -71,10 +74,18 @@ class VOCClassSegBase(VOCConfigs):
 
         img_file = data_file['img']
         img = Image.open(img_file)
-        img = np.array(img, dtype=np.uint8)
-
         lbl_file = data_file['lbl']
-        lbl = Image.open(lbl_file)
+        lbl = Image.open(lbl_file)  # open in mode "P"
+
+        if self._resize:
+            img = img.resize(
+                (self._VOC_BASE_SIZE, self._VOC_BASE_SIZE), Image.BILINEAR
+            )
+            lbl = lbl.resize(
+                (self._VOC_BASE_SIZE, self._VOC_BASE_SIZE), Image.NEAREST
+            )
+
+        img = np.array(img, dtype=np.uint8)
         lbl = np.array(lbl, dtype=np.int32)
         lbl[lbl == 255] = -1
 
@@ -83,8 +94,9 @@ class VOCClassSegBase(VOCConfigs):
     def to_tensor(self, img, lbl):
         """
         to unnormalized torch tensor
-        img: float, mean substracted
-        target: long
+        Returns:
+        img: float tensor, mean substracted
+        lbl: long tensor
         """
         img = img[:, :, ::-1]  # RGB -> BGR
         img = img.astype(np.float64)
@@ -114,9 +126,9 @@ class VOC2011ClassSeg(VOCClassSegBase):
     This class use non-intersecting val set defined in the seg11valid.txt
     """
 
-    def __init__(self, root, split='seg11valid', transform=False):
+    def __init__(self, root, split='seg11valid', resize=False):
         super(VOC2011ClassSeg, self).__init__(
-            root, split=split, transform=transform
+            root, split=split, resize=resize
         )
         imgsets_file = os.path.join(
             os.path.dirname(os.path.realpath(__file__)), "seg11valid.txt"
@@ -133,10 +145,10 @@ class VOC2011ClassSeg(VOCClassSegBase):
 
 class SBDClassSeg(VOCClassSegBase):
 
-    def __init__(self, root, split='train', transform=False):
+    def __init__(self, root, split='train', resize=False):
         self.root = root
         self.split = split
-        self._transform = transform
+        self._resize = resize
 
         dataset_dir = os.path.join(self.root, 'benchmark_RELEASE/dataset')
         self.files = collections.defaultdict(list)
@@ -156,11 +168,21 @@ class SBDClassSeg(VOCClassSegBase):
 
         img_file = data_file['img']
         img = Image.open(img_file)
-        img = np.array(img, dtype=np.uint8)
-
         lbl_file = data_file['lbl']
         mat = scipy.io.loadmat(lbl_file)
-        lbl = mat['GTcls'][0]['Segmentation'][0].astype(np.int32)
+        lbl = mat['GTcls'][0]['Segmentation'][0]  # uint8
+
+        if self._resize:
+            img = img.resize(
+                (self._VOC_BASE_SIZE, self._VOC_BASE_SIZE), Image.BILINEAR
+            )
+            lbl = Image.fromarray(lbl, model="P")
+            lbl = lbl.resize(
+                (self._VOC_BASE_SIZE, self._VOC_BASE_SIZE), Image.NEAREST
+            )
+
+        img = np.array(img, dtype=np.uint8)
+        lbl = np.array(lbl, dtype=np.int32)
         lbl[lbl == 255] = -1
 
         return self.to_tensor(img, lbl)

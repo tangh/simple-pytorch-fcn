@@ -15,11 +15,11 @@ def _fast_hist(label_true, label_pred, n_class):
 def label_accuracy_score(label_trues, label_preds, n_class):
     """
     Arguments:
-        label_trues (list[np int array (H×W)] OR np int array (N×H×W))
-        label_preds (list[np int array (H×W)] OR np int array (N×H×W))
+        label_trues (list[int ndarray (H×W)] OR int ndarray (N×H×W))
+        label_preds (list[int ndarray (H×W)] OR int ndarray (N×H×W))
         n_class (int)
 
-    Returns: accuracy score evaluation result.
+    Returns: accuracy score evaluation result (averaged on each image).
         acc (python float number): overall pixel accuracy
         acc_cls (python float number): mean class pixel accuracy
         mean_iou (python float number): mean IoU
