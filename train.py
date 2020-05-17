@@ -26,9 +26,9 @@ parser.add_argument('--batch-size', type=int, default=1,
 parser.add_argument('--max-iter', type=int, default=100000,
                     help='max training iterations')
 parser.add_argument('--warmup', type=int, default=0, help='warmup iters')
-parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
+parser.add_argument('--lr', type=float, default=1e-10, metavar='LR',
                     help='learning rate (default: 1e-4)')
-parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
+parser.add_argument('--momentum', type=float, default=0.99, metavar='M',
                     help='momentum (default: 0.9)')
 parser.add_argument('--weight-decay', type=float, default=5e-4, metavar='W',
                     help='weight decay (default: 5e-4)')
@@ -56,13 +56,16 @@ args = parser.parse_args()
 # --------------------------------------------------------------------------- #
 if not os.path.exists(args.save_dir):
     os.mkdir(args.save_dir)
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
 device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
 
 # make dataloader return fixed sequence of samples
 torch.manual_seed(1337)
 if device == "cuda":
+    print("USE GPU %s." %os.environ["CUDA_VISIBLE_DEVICES"])
     torch.cuda.manual_seed(1337)
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
 
 logger = setup_logger("simple-pytorch-fcn", args.save_dir)
 logger.info(args)

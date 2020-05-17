@@ -8,6 +8,8 @@ A simple pytorch implement of [Fully Convolutional Networks](https://github.com/
 + [pytorch](https://github.com/pytorch/pytorch) >= 1.1.0
 + numpy, scipy, pillow(pil), scikit-image, opencv, tqdm
 
+`pip install -r requirements.txt`
+
 Test on Python 3.8 and PyTorch 1.4.
 
 
@@ -16,7 +18,7 @@ Test on Python 3.8 and PyTorch 1.4.
 
 ## Training
 
-Run `python train.py --model fcn32s --dataset voc --max-iter 20000 --save-dir ./checkpoints/fcn32s`
+Run `python train.py --model fcn32s --dataset voc --max-iter 20000 --save-dir ./checkpoints/fcn32s`. *Or* `sh ./scripts/train_fcn_sbd.sh` or `sh ./scripts/train_fcn_voc.sh`.
 
 **Arguments:**
 + `--model`: `fcn32s` or `fcn16s` or `fcn8s`.
@@ -47,11 +49,19 @@ Run `python demo.py --model fcn32s --checkpoint ./checkpoints/fcn32s/model_best.
 
 # Results
 
-TODO
+| \[mIoU\] | FCN-32s | FCN-16s | FCN-8s |
+| :------: | :-----: | :-----: | :----: |
+|    VOC   |  57.86  |  59.74  |  60.14 |
+|    SBD   |  62.64  |  64.48  |  64.87 |
+| Original CVPR | 59.4 | 62.4 | 62.7 |
+| Original PAMI | 63.6 | 65.0 | 65.5 |
+
+See `./checkpoints` dir for more details.
 
 
 
 # References
 
++ [shelhamer/fcn.berkeleyvision.org](https://github.com/shelhamer/fcn.berkeleyvision.org)
 + [wkentaro/pytorch-fcn](https://github.com/wkentaro/pytorch-fcn)
 + [facebookresearch/maskrcnn-benchmark](https://github.com/facebookresearch/maskrcnn-benchmark)
